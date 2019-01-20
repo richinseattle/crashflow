@@ -1,0 +1,260 @@
+extern crate protobuf;
+extern crate capstone;
+
+use capstone::prelude::*;
+
+mod frame;
+use protobuf::{parse_from_bytes, ProtobufResult};
+use protobuf::error::ProtobufError;
+
+use std::error::Error;
+
+use std::fs::File;
+//use std::io::{self, stderr};
+use std::path::Path;
+use std::{env, mem};
+
+use memmap::MmapOptions;
+
+/*
+macro_rules! fatal {
+    ($($tt:tt)*) => {{
+        use std::io::Write;
+        writeln!(&mut ::std::io::stderr(), $($tt)*).unwrap();
+        ::std::process::exit(1)
+    }}
+}
+*/
+
+/**
+ * A container for trace frames.  We do not use protobuffers because
+ * protobuffers can not stream output (the whole trace would have to
+ * be in memory before being written) or input (the whole trace would
+ * need to be unserialized to get one frame).
+ *
+ * The trace format is extremely simple. All numbers are
+ * little-endian.
+ *
+ * [<uint64_t magic number>
+ *  <uint64_t trace version number>
+ *  <uint64_t bfd_architecture>
+ *  <uint64_t bfd_machine, 0 for unspecified>
+ *  <uint64_t n = number of trace frames>
+ *  <uint64_t offset of field m (below)>
+ *  [ <uint64_t sizeof(trace frame 0)>
+ *    <trace frame 0>
+ *    ..............
+ *    <uint64_t sizeof(trace frame n)>
+ *    <trace frame n> ]
+ *  <uint64_t m, where a table of contents entry is given
+ *  for m, 2m, 3m, ..., ceil(n/m)>
+ *  [ <uint64_t offset of sizeof(trace frame m)>
+ *    <uint64_t offset of sizeof(trace frame 2m)>
+ *    ...
+ *    <uint64_t offset of sizeof(trace frame ceil(n/m))> ]]
+ *
+ *  One additional feature that might be nice is log_2(n) lookup
+ *  time using a hierarchical toc.
+ */
+
+
+const MAGIC_NUMBER:u64 = 7456879624156307493;
+//const DEFAULT_FRAMES_PER_TOC_ENTRY:u64 = 10000;
+
+const bfd_mach_i386_i386 :u64 = (1 << 2);
+const bfd_mach_x86_64 :u64    = (1 << 3); // 64
+const bfd_arch_i386:u64 = 9;
+
+const DEFAULT_ARCH:u64 = bfd_arch_i386;
+const DEFAULT_MACHINE:u64 = bfd_mach_x86_64;
+
+/*
+const MAGIC_NUMBER_offset:u64 = 0;
+const trace_version_offset:u64 = 8;
+const bfd_arch_offset:u64 = 16;
+const bfd_machine_offset:u64 = 24;
+const num_trace_frames_offset:u64 = 32;
+const toc_offset_offset:u64 = 40;
+*/
+
+struct TraceHeader {
+    magic_number:u64,
+    trace_version:u64,
+    bfd_arch:u64,
+    bfd_machine:u64,
+    num_trace_frames:u64,
+    toc_offset:u64
+}
+const TRACE_HEADER_SIZE:usize = mem::size_of::<TraceHeader>();
+
+const OUT_TRACE_VERSION :u64 = 1;
+const LOWEST_SUPPORTED_VERSION:u64 = 1;
+const HIGHEST_SUPPORTED_VERSION:u64 = OUT_TRACE_VERSION;
+
+const FIRST_FRAME_OFFSET:usize = TRACE_HEADER_SIZE;
+
+
+/*
+fn get_tracefile_header(tracefile: File::File) -> Result<TraceHeader, String> {
+    let mut trace_header :TraceHeader;
+    Ok(trace_header)
+}
+*/
+/*
+fn map_file(file: <std::fs::File as Trait>::File) -> Result<memmap::Mmap, String> {
+        let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
+        Ok(mmap)
+}
+*/
+
+//use byteorder::{BigEndian, ReadBytesExt}; // 1.2.7
+
+fn main() {
+
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        println!("Usage: cargo run <moflow trace>");
+        return
+    }
+
+    let path = Path::new(&args[1]);
+    let file = File::open(&path).unwrap(); //.map_err(ProtobufError::IoError)?;
+    let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };  //println!("n: {}", &mmap[0..4] as u64);
+    
+    let mut slice = mmap.get(0..TRACE_HEADER_SIZE).unwrap();
+    let header: TraceHeader = unsafe { std::ptr::read(slice.as_ptr() as *const _) };
+
+    println!("magic:   {:?}", header.magic_number);
+    println!("version: {:?}", header.trace_version);
+    println!("arch: {:?}", header.bfd_arch);
+    println!("machine: {:?}", header.bfd_machine);        
+    println!("toc offset:  {:?}", header.toc_offset);
+    println!("frame count: {:?}", header.num_trace_frames);
+
+    if header.trace_version > HIGHEST_SUPPORTED_VERSION || header.trace_version < LOWEST_SUPPORTED_VERSION {
+        println!("Error: unsupported trace version");
+        return
+    }
+
+    let mut trace_toc = Vec::new();
+
+    let mut offset = header.toc_offset as usize;
+    slice = mmap.get(offset..(offset + 8)).unwrap();
+    let frames_per_toc_entry = unsafe { std::ptr::read(slice.as_ptr() as *mut usize) };
+    let toc_count = (header.num_trace_frames - 1) / frames_per_toc_entry as u64;
+    println!("toc count: {} frames per toc: {}", toc_count, frames_per_toc_entry);
+    offset += 8;
+    for i in 0 .. toc_count {
+        slice = mmap.get(offset..(offset + 8)).unwrap();
+        let toc_offset = unsafe { std::ptr::read(slice.as_ptr() as *mut usize) };
+        trace_toc.push(toc_offset);
+        offset += 8;
+    }
+
+    println!("{}", trace_toc.len());
+    for off in trace_toc {
+        println!("toc {}", off);
+    }
+
+
+    let mut cs = Capstone::new()
+        .x86()
+        .mode(arch::x86::ArchMode::Mode64)
+        .syntax(arch::x86::ArchSyntax::Intel)
+        .detail(false)
+        .build()
+        .expect("Failed to create Capstone object");
+
+    offset = FIRST_FRAME_OFFSET;
+    for x in 0..(header.num_trace_frames) {
+
+        slice = mmap.get(offset..(offset + 8)).unwrap();
+        offset += 8;
+        
+        let next_frame_size = unsafe { std::ptr::read(slice.as_ptr() as *mut usize) };
+        //println!("\nFRAME id: {}  size: {}", x, next_frame_size);
+        
+        slice = mmap.get(offset..(offset + next_frame_size)).unwrap();
+        offset += next_frame_size;
+
+        let trace_frame :frame::frame = parse_from_bytes::<frame::frame>(slice).unwrap();
+        if trace_frame.has_modload_frame() {
+            let modload_frame = trace_frame.get_modload_frame();
+            println!("[{}] Loaded module: 0x{:016x} - 0x{:016x}  {}", x, modload_frame.get_low_address(), modload_frame.get_high_address(), modload_frame.get_module_name());
+            continue;
+        } 
+
+        if trace_frame.has_taint_intro_frame() {
+            let taint_list = trace_frame.get_taint_intro_frame().get_taint_intro_list();
+            let elem = taint_list.get_elem();
+        
+            // 214 frames present
+            
+            println!("\n[{}] Tainting {} bytes mapped at 0x{:016x} from source {} byte range {} - {}", x, elem.len(), elem.get(0).unwrap().get_addr(), elem.get(0).unwrap().get_source_name(), elem.get(0).unwrap().get_offset(), elem.get(0).unwrap().get_offset() + elem.len() as u64);
+            print!("\n     ");
+            for ele in elem {
+                print!("{:X?} ", ele.get_value());
+                if ele.get_taint_id() % 16 == 0 {
+                    print!("\n     ");
+                }
+                //println!("elem: {}", ele.get_addr());
+            }
+            println!("");
+            println!("");
+            continue;
+        }
+
+
+        if trace_frame.has_std_frame() {
+            let std_frame = trace_frame.get_std_frame();
+            let insns = cs.disasm_all(std_frame.get_rawbytes(), std_frame.get_address()).expect("disas fail");
+            for insn in insns.iter() {
+                println!("[{}][tid={}] 0x{:016x}: {} {}", x, std_frame.get_thread_id(), insn.address(), insn.mnemonic().unwrap(), insn.op_str().unwrap());
+                let prelist = std_frame.get_operand_pre_list().get_elem();
+                println!("operand values before:");
+                for ele in prelist {
+                    let info = ele;
+                    let op_info = info.get_operand_info_specific();
+                    if(op_info.has_reg_operand())
+                    {
+                        println!("{}", op_info.get_reg_operand().get_name());
+                    }
+                    else if(op_info.has_mem_operand())
+                    {
+                        println!("*0x{:016x}", op_info.get_mem_operand().get_address());
+                    }
+                    else
+                    {
+                        println!("{:?}", info.get_operand_info_specific());
+                    }
+                    //println!("{:?}", info.get_operand_usage());
+                    //println!("{:?}", info.get_taint_info());
+                    println!("{:?}", info.get_value());
+                }
+                let postlist = std_frame.get_operand_post_list();
+                println!("");
+            }
+            //println!(" address: {}  thread: {} ", std_frame.get_address(), );
+
+            continue;
+        }
+        
+        if trace_frame.has_key_frame() {
+            continue;
+        }
+        
+        println!("frame:   {:?}", trace_frame);
+        
+    }
+    
+    
+
+    
+    //assert_eq!(b"# memmap", &mmap[0..8]);
+    //let address = parse_from_reader::<AddressBook>(&mut file)?;
+    //print(&address);
+
+    //parse_from_reader::<TraceHeader>(&mut file).unwrap();
+
+    return
+}
