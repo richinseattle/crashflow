@@ -199,20 +199,6 @@ impl fmt::Display for Instruction {
             .expect("Failed to create Capstone object");
 
         let insn_string = "".to_string();
-        /* 
-        let insns = cs.disasm_count(std_frame.get_rawbytes(), std_frame.get_address(), 1).expect("disas fail");
-        for insn in insns.iter() {
-            if self.header.bfd_arch == 64 {
-//                insn_string = format!("[{:5}] tid={:<5} addr 0x{:016x}: {} {}", frame_num, std_frame.get_thread_id(), insn.address(), insn.mnemonic().unwrap(), insn.op_str().unwrap());
-            } else {
-//                insn_string = format!("     tid={:<5} addr 0x{:08x}: {} {}", std_frame.get_thread_id(), insn.address(), insn.mnemonic().unwrap(), insn.op_str().unwrap());
-            }
-
-        }
-        //self.pp_operand_info(std_frame.get_operand_pre_list().get_elem());
-        println!("");
-        */
-        //std_frame.get_operand_post_list() is always empty?
         write!(fmt, "{}", insn_string)
     }
 }
@@ -270,17 +256,6 @@ impl MoflowTrace {
     fn new(file_path: &str) -> Result<MoflowTrace, ProtobufError> {
         let file = File::open(&Path::new(file_path)).map_err(ProtobufError::IoError)?;
         let mmap = unsafe { MmapOptions::new().map(&file)? };  
-
-/*
-        // this is probably expensive but making this global is hard 
-        let mut cs = Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode64)
-            .syntax(arch::x86::ArchSyntax::Intel)
-            .detail(false)
-            .build()
-            .expect("Failed to create Capstone object");
-*/
 
         // read trace header as raw struct from mmap
         let slice = &mmap[0..TRACE_HEADER_SIZE];
@@ -539,86 +514,6 @@ impl MoflowTrace {
 
     }
 */
-/*
-    fn pp_frame(self, trace_frame: &frame::frame, frame_num: u64)
-    {   
-    
-        if trace_frame.has_std_frame() {
-            let std_frame = trace_frame.get_std_frame();
-            self.pp_std_frame(std_frame, frame_num);
-
-            return;
-        }
-        
-        if trace_frame.has_key_frame() {
-            println!("{:?}", trace_frame.get_key_frame());
-            return;
-        }
-        
-        if trace_frame.has_syscall_frame() {
-            
-            // the syscall numbers in the trace don't make sense, so skip for now
-            /*
-            let syscall = trace_frame.get_syscall_frame();
-            let sysname_str = match syscall.get_number() {
-                0 => "sys_read",
-                1 => "sys_write",
-                2 => "sys_open",
-                3 => "sys_close",
-                9 => "sys_mmap",
-                _ => "sys_other",
-            };
-            println!("SYSCALL from thread {} at address 0x{:08X}: {}", 
-                syscall.get_thread_id(),
-                syscall.get_address(),
-                sysname_str);            
-            println!("{:?}", trace_frame.get_syscall_frame());
-            */
-            return;
-        }
-        
-        if trace_frame.has_exception_frame() {
-            let ex = trace_frame.get_exception_frame();
-            if self.header.bfd_arch == 64 {
-                println!("Exception code {} in thread {} at address 0x{:016X}",
-                    ex.get_exception_number(),
-                    ex.get_thread_id(),
-                    ex.get_from_addr());
-            } else {
-                println!("Exception code {} in thread {} at address 0x{:08X}",
-                    ex.get_exception_number(),
-                    ex.get_thread_id(),
-                    ex.get_from_addr());
-            }
-            return;
-        }
-        println!("XXXXXXXXXXXXXXXXX UNHANDLED FRAME XXXXXXXXXXXXXXXXXXXXX");
-        println!("{:?}", trace_frame);
-        println!("XXXXXXXXXXXXXXXXX UNHANDLED FRAME XXXXXXXXXXXXXXXXXXXXX");        
-    }
-    */
-
-
-    /*
-    fn extract_operand_info(&self, info: &frame::operand_info) -> (String, OperandAccess, )
-    {
-
-    }
-    */
-    /*
-    */
-    /*
-    return:
-        op_string,
-        op_access,
-        taint_id,
-        size,
-        value,
-        
-    */
-    /*
-
-*/
 
     fn addr_to_string(&self, address: u64) -> String {
         if self.header.bfd_arch == 64 {
@@ -644,30 +539,6 @@ impl MoflowTrace {
         //self.pp_frame(&trace_frame, frame_num, cs);
         self.pp_frame(&trace_frame, frame_num);
     }
-
-/* DELETE
-    fn __pp_std_frame(trace: &MoflowTrace, std_frame: &frame::std_frame, frame_num: u64, cs: &capstone::Capstone)
-    {
-        let insns = cs.disasm_count(std_frame.get_rawbytes(), std_frame.get_address(), 1).expect("disas fail");
-        for insn in insns.iter() {
-            if trace.header.bfd_arch == 64 {
-            println!("[{:5}] tid={:<5} addr 0x{:016x}: {} {}", frame_num, std_frame.get_thread_id(), insn.address(), insn.mnemonic().unwrap(), insn.op_str().unwrap());
-            } else {
-                println!("# FRAME {:<6} ################################################################", frame_num);
-                println!("");
-                println!("     tid={:<5} addr 0x{:08x}: {} {}", std_frame.get_thread_id(), insn.address(), insn.mnemonic().unwrap(), insn.op_str().unwrap());
-            }
-
-        }
-        trace.pp_operand_info(std_frame.get_operand_pre_list().get_elem());
-        println!("");
-        
-        //these don't exist
-        //println!("operand values after:");
-        //pp_operand_info(std_frame.get_operand_post_list().get_elem());
-    }
-*/
-
 
     //fn pp_frame(&self, trace_frame: &frame::frame, frame_num: u64, cs: &mut capstone::Capstone<'_>)
     fn pp_frame(&self, trace_frame: &frame::frame, frame_num: u64)
