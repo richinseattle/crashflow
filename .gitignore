@@ -11,3 +11,4 @@ Cargo.lock
 
 /target
 **/*.rs.bk
+data/less32.trace
