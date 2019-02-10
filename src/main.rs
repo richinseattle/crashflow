@@ -150,24 +150,23 @@ struct TaintIntro {
 }
 impl TaintIntro {
     fn new(frame_num: u64, frame: &frame::taint_intro_frame) -> Result<TaintIntro, ProtobufError> {
-            let taint_list = frame.get_taint_intro_list().get_elem();
-            let first_byte = &taint_list[0];
-            
-            let mut data = Vec::new();
-            for taint_byte in taint_list {
-                data.push(taint_byte.get_value()[0]);
-            }
-            
-            return Ok(TaintIntro {
-                    frame_num: frame_num,
-                    address: first_byte.get_addr() as u64,
-                    size: taint_list.len() as usize,  
-                    taint_id: first_byte.get_taint_id() as u32,
-                    source: first_byte.get_source_name().to_string(),
-                    source_offset: first_byte.get_offset() as usize,
-                    data: data,
-                });
-
+        let taint_list = frame.get_taint_intro_list().get_elem();
+        let first_byte = &taint_list[0];
+        
+        let mut data = Vec::new();
+        for taint_byte in taint_list {
+            data.push(taint_byte.get_value()[0]);
+        }
+        
+        return Ok(TaintIntro {
+                frame_num: frame_num,
+                address: first_byte.get_addr() as u64,
+                size: taint_list.len() as usize,  
+                taint_id: first_byte.get_taint_id() as u32,
+                source: first_byte.get_source_name().to_string(),
+                source_offset: first_byte.get_offset() as usize,
+                data: data,
+            });
     }
 }
 impl fmt::Display for TaintIntro {
