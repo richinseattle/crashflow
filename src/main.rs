@@ -188,15 +188,6 @@ struct Instruction {
 
 impl fmt::Display for Instruction {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        // this is probably expensive but making this global is hard 
-        let mut cs = Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode64)
-            .syntax(arch::x86::ArchSyntax::Intel)
-            .detail(false)
-            .build()
-            .expect("Failed to create Capstone object");
-
         let insn_string = "".to_string();
         write!(fmt, "{}", insn_string)
     }
@@ -236,8 +227,6 @@ impl TaintInfo {
 }
 
 struct MoflowTrace {
-    //file: File,
-    //cs: capstone::Capstone<'cs>,
     mmap: memmap::Mmap,
     header: MoflowTraceHeader,
     toc: Vec<u64>,
@@ -333,8 +322,6 @@ impl MoflowTrace {
         println!("\rIndexing trace... done.");
         
         Ok(MoflowTrace { 
-            //file: file, 
-            //cs: cs,
             mmap: mmap,
             header: header,        
             toc: toc,
@@ -347,36 +334,14 @@ impl MoflowTrace {
         })
     }
 
-    //fn pp_std_frame(&self, std_frame: &frame::std_frame, frame_num: u64, cs: &mut capstone::Capstone<'_>)
-    fn pp_std_frame(&self, std_frame: &frame::std_frame, frame_num: u64)
+    fn pp_std_frame(&self, std_frame: &frame::std_frame, frame_num: u64, cs: &mut capstone::Capstone)
     {
-        let mut cs;
-        if self.header.bfd_arch == 64 {
-            cs = Capstone::new()
-                .x86()
-                .mode(arch::x86::ArchMode::Mode64)
-                .syntax(arch::x86::ArchSyntax::Intel)
-                .detail(false)
-                .build()
-                .expect("Failed to create Capstone object");
-        } else { // 32 bit
-            cs = Capstone::new()
-                .x86()
-                .mode(arch::x86::ArchMode::Mode32)
-                .syntax(arch::x86::ArchSyntax::Intel)
-                .detail(false)
-                .build()
-                .expect("Failed to create Capstone object");
-        }
         let insns = cs.disasm_count(std_frame.get_rawbytes(), std_frame.get_address(), 1).expect("disas fail");
         for insn in insns.iter() {
             if self.header.bfd_arch == 64 {
             println!("[{:5}] tid={:<5} addr 0x{:016x}: {} {}", frame_num, std_frame.get_thread_id(), insn.address(), insn.mnemonic().unwrap(), insn.op_str().unwrap());
             } else {
                 println!("");                
-                //println!("# FRAME {:<6} ################################################################", frame_num);
-                //println!("");
-                //println!("[{:5}] tid={:<5} addr 0x{:08x}: {} {}", frame_num, std_frame.get_thread_id(), insn.address(), insn.mnemonic().unwrap(), insn.op_str().unwrap());
                 let insn_string = format!("{} {}", insn.mnemonic().unwrap(), insn.op_str().unwrap()).to_uppercase();
                 println!("[{:5}] tid={:<5} addr 0x{:08x}: {}", frame_num, std_frame.get_thread_id(), insn.address(), insn_string);
             }
@@ -435,7 +400,7 @@ impl MoflowTrace {
         //let mut op_use_str = "".to_string();
         let op_taint = info.get_taint_info();
         let taint_id: i64;
-        let mut taint_str = 
+        let taint_str = 
             if op_taint.get_no_taint() == true { taint_id = 0; "no-taint".to_string() }
             else if op_taint.get_taint_id() != 0 { taint_id = op_taint.get_taint_id() as i64; format!("taint_id: {}", taint_id) }
             else if op_taint.get_taint_multiple() == true { taint_id = -1; "multi-taint".to_string() }
@@ -522,25 +487,20 @@ impl MoflowTrace {
         }
     }
     
-    //fn pp_frame_range(&self, trace: &MoflowTrace, low: u64, high: u64, cs: &mut capstone::Capstone<'_>)
-    fn pp_frame_range(&self, trace: &MoflowTrace, low: u64, high: u64)
+    fn pp_frame_range(&self, trace: &MoflowTrace, low: u64, high: u64, cs: &mut capstone::Capstone)
     {
-        //for i in low .. high { self.pp_frame_num(trace, i, cs); }
-        for i in low .. high { self.pp_frame_num(trace, i); }
+        for i in low .. high { self.pp_frame_num(trace, i, cs); }
     }
 
-    //fn pp_frame_num(&self, trace: &MoflowTrace, frame_num: u64, cs: &mut capstone::Capstone<'_>)
-    fn pp_frame_num(&self, trace: &MoflowTrace, frame_num: u64)
+    fn pp_frame_num(&self, trace: &MoflowTrace, frame_num: u64, cs: &mut capstone::Capstone)
     {
         let (mmap_offset, frame_size) = self.frame_idx[frame_num as usize];
         let slice = &self.mmap[mmap_offset..(mmap_offset + frame_size as usize)];
         let trace_frame :frame::frame = parse_from_bytes::<frame::frame>(slice).unwrap();
-        //self.pp_frame(&trace_frame, frame_num, cs);
-        self.pp_frame(&trace_frame, frame_num);
+        self.pp_frame(&trace_frame, frame_num, cs);
     }
 
-    //fn pp_frame(&self, trace_frame: &frame::frame, frame_num: u64, cs: &mut capstone::Capstone<'_>)
-    fn pp_frame(&self, trace_frame: &frame::frame, frame_num: u64)
+    fn pp_frame(&self, trace_frame: &frame::frame, frame_num: u64, cs: &mut capstone::Capstone)
     {   
         if trace_frame.has_modload_frame() {
             let modload_frame = trace_frame.get_modload_frame();
@@ -567,13 +527,10 @@ impl MoflowTrace {
             return
         }
 
-        //let mut _cs = cs; 
-
         if trace_frame.has_std_frame() {
             let std_frame = trace_frame.get_std_frame();
-            //self.pp_std_frame(std_frame, frame_num, cs);
-            self.pp_std_frame(std_frame, frame_num);
-
+            self.pp_std_frame(std_frame, frame_num, cs);
+            
             return;
         }
         
@@ -607,7 +564,6 @@ impl MoflowTrace {
         println!("");
         println!("XXXXXXXXXXXXXXXXX UNHANDLED FRAME XXXXXXXXXXXXXXXXXXXXX");
         fatal!("{:?}", trace_frame);
-        //println!("XXXXXXXXXXXXXXXXX UNHANDLED FRAME XXXXXXXXXXXXXXXXXXXXX");     
         
         return
     }
@@ -658,7 +614,23 @@ fn main() {
         return
     }
 
-    let mut trace = MoflowTrace::new(&args[1]).expect("\nError: failed to load trace\n");
+    let trace = MoflowTrace::new(&args[1]).expect("\nError: failed to load trace\n");
+
+    let arch = match trace.header.bfd_arch {
+        64 => arch::x86::ArchMode::Mode64,
+        _  => arch::x86::ArchMode::Mode32,
+        //32 => arch::x86::ArchMode::Mode32,
+        //_ => panic!("Unknown arch found in header"),
+    };
+
+    let mut cs = Capstone::new()
+        .x86()
+        .mode(arch)
+        .syntax(arch::x86::ArchSyntax::Intel)
+        .detail(false)
+        .build()
+        .expect("Failed to create Capstone object");
+
     println!("# TRACE HEADER ################################################################");
     pp_trace_header(&trace);
     println!("##############################################################################");
@@ -671,19 +643,10 @@ fn main() {
         //println!("Loaded module: {}", module);
     }
 
-    let mut cs = Capstone::new()
-        .x86()
-        .mode(arch::x86::ArchMode::Mode64)
-        .syntax(arch::x86::ArchSyntax::Intel)
-        .detail(false)
-        .build()
-        .expect("Failed to create Capstone object");
-
     // print entire trace
     println!("# TRACE FRAMES ################################################################");
-    //trace.pp_frame_range(&trace, 0, trace.header.num_trace_frames, &cs);
-    trace.pp_frame_range(&trace, 0, trace.header.num_trace_frames);
-
+    trace.pp_frame_range(&trace, 0, trace.header.num_trace_frames, &mut cs);
+ 
 
     let header = &trace.header;
 
@@ -703,11 +666,9 @@ impl<'a> HexSlice<'a> {
     }
 }
 
-// You can even choose to implement multiple traits, like Lower and UpperHex
 impl<'a> fmt::Display for HexSlice<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for byte in self.0 {
-            // Decide if you want to pad out the value here
             write!(f, "{:X} ", byte)?;
         }
         Ok(())
